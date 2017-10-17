@@ -1,0 +1,199 @@
+<HTML>
+<HEAD>
+   <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+   <META NAME="Author" CONTENT="Guy Lancaster">
+   <META NAME="GENERATOR" CONTENT="Mozilla/4.03 [en] (Win95; U) [Netscape]">
+   <META NAME="Description" CONTENT="Release notes for uC/IP, a free TCP/IP/PPP Stack for uC/OS">
+   <TITLE>uC/IP Release Notes</TITLE>
+</HEAD>
+<BODY>
+Release notes for uC/IP, a free TCP/IP/PPP stack for
+uC/OS
+<BR>Version 1.0.0
+<BR>By Guy Lancaster &lt;lancasterg@acm.org> 1998-8-10
+<CENTER>
+<H1>
+uC/IP Release Notes</H1></CENTER>
+These release notes for uC/IP are divided into the following sections:
+<UL>
+<LI>
+<A HREF="#Introduction">Introduction</A> - An overview of the uC/IP project.</LI>
+
+<LI>
+<A HREF="#Design">Design Overview</A> - Comments on the design of the stack.</LI>
+
+<LI>
+<A HREF="#Features">Features</A> - Description of the features provided
+or not by uC/IP.</LI>
+
+<LI>
+Copyright - Description of the copyrights on the source files.</LI>
+
+<LI>
+Files - A brief description of each of the source files.</LI>
+
+<LI>
+Build - Comments on how to build the stack for your application.</LI>
+
+<LI>
+To Do - A non-trivial list of things on the wish list.</LI>
+
+<LI>
+Support - Where to find support in using the stack.</LI>
+</UL>
+
+<H2>
+<A NAME="Introduction"></A>Introduction</H2>
+This is the first release of a free TCP/IP/PPP protocol stack for the <A HREF="http://www.ucos-ii.com/">uC/OS</A>
+Real-Time Operating System.&nbsp; As a first release it's still rather
+rough and very much larger than desired however it is working well in an
+embedded product and therefore may be useful to others.&nbsp; Much of the
+code is ported from public sources including BDS Lite and KA9Q (and its
+derivatives) and carries copyright notices from those sources.&nbsp; Essentially
+TCP is based on KA9Q but with ideas from BSD, IP is a simple implementation
+supporting BSD structures, ICMP is ported from BSD, and PPP is ported from
+the BSD version of the distribution common to BSD, Linux, and many other
+systems.
+<H3>
+A Brief History</H3>
+We at Global Election Systems Inc. have been converting our embedded systems
+from monolithic designs and proprietary protocols to real-time multitasking
+designs and standard protocols.&nbsp; For various reasons, we chose uC/OS
+as the foundation for our projects but when evaluating the commercial TCP
+offerings, we felt that we would want to tweak them as much as we would
+the public sources and therefore we might as well just work with the public
+sources.&nbsp; We started with volumes 1 and 2 of Stevens' TCP/IP Illustrated
+and a CDROM of BSD-Lite and dived into it.&nbsp; As always, it was rather
+more involved than planned but also more rewarding in that by the time
+we got through it, we really knew our stuff.&nbsp; Luckily Global has no
+commercial interest in the result and was quite willing to let me make
+the code publicly available provided that I did it on my own time and that
+there was no liability to the company.
+<H2>
+<A NAME="Design"></A>Design Overview</H2>
+This stack is designed for a small black box system with a minimal user
+interface and a serial port.&nbsp; No keyboard, no video display, no disk
+drive, and no network adaptor.&nbsp; In various modes our box can operate
+independantly with occasional connections to a host or it can work online
+with continous communications with the host.&nbsp; Our serial link may
+be directly connected to the host or via modem and telephone lines.&nbsp;
+Now, using the TCP procotols, the connection may go through any network
+configuration including the Internet.
+<H3>
+Network Buffers</H3>
+Central to the sources we used is the idea of a network or memory buffer.&nbsp;
+In BSD and KA9Q it's known as an mbuf.&nbsp; Normally data is transferred
+to a chain of buffers at the packet interface (commonly known simply as
+an interface) which are then transferred via queues through the protocol
+layers until finally being unloaded at the socket layer.&nbsp; We modified
+the design of the mbuf and renamed it nbuf for Network Buffer.&nbsp; Since
+our system has limited RAM space and we want to guarantee that needed space
+is always available, we create a fixed number of nbufs and manage them
+as a resource pool.&nbsp; The netbuf module provides functions supporting
+nbuf allocation and queueing and services such as prepending, appending,
+and truncating nbuf chains.&nbsp; In our stack, we use nbufs right from
+the serial interrupt handler up to the application interface.
+
+<P>For any particular application, it's important to select the nbuf and
+pool sizes for optimum performance.&nbsp; First, set the size of the nbufs
+so that on average, each packet fits in a single nbuf.&nbsp; If your application
+communicates with a lot of small packets and rarely more than 100 bytes,
+say a telnet app that returns a single line at a time, then set the nbuf
+size to about 50 bytes and allocate more of them.&nbsp; If your application
+does bulk transfers, set the nbuf size to handle a full TCP segment and
+thereby minimize the chaining overhead.&nbsp; There is currently a minimum
+nbuf size since it needs to handle an entire LCP packet in PPP.&nbsp; With
+a little work LCP would be able to handle packets split across multiple
+nbufs.
+
+<P>In the next pass through the code I'd like to add a buffer type field
+that the protocols can use to automatically handle data from different
+sources.&nbsp; In particular, I'd like to know whether or not a PPP packet
+needs to have special characters escaped or not so that this could be handled
+in the serial driver.&nbsp; When the PPP protocols build a packet, they
+automatically encode the special characters.&nbsp; To handle this, PPP
+needs to know where a packet originated and then ensure that all packets
+are encoded before passing them to the serial driver.&nbsp; This requires
+a character by character filter (copy) operation which could trivially
+be handled at the driver level if only it knew.
+<H3>
+Point to Point Protocol</H3>
+The PPP code was the first code implemented and is the greatest resource
+hog.&nbsp; PPP is composed of a number of different protocols handling
+everything from testing the link to compression and user authentication.&nbsp;
+Essentially PPP recieves nbuf packet chains from the serial port, filters
+out the escape sequences, passes it through decompressors and finally passes
+an IP packet to the IP protocol.&nbsp; In most systems PPP is implemented
+as a packet driver so that it's compatible with the interface for an ethernet
+packet driver but that requires managing another set of buffers.
+
+<P>Most of the PPP protocols use the finite state machine engine in the
+netfsm module.&nbsp; Note that although code is included for CHAP, it has
+never been used and will not likely work out-of-the-box.
+<H3>
+Transaction Control Protocol/Internet Protocol</H3>
+As mentioned, the TCP code is based on the KA9Q sources although the TCP
+Control Block (TCB) includes fields from the BSD codes.&nbsp; The biggest
+changes from either of these sources is in the timers and the use of semaphores.&nbsp;
+KA9Q was written for the single tasking environment of DOS and therefore
+uses callback functions to drive applications using the stack.&nbsp; We
+wanted to make blocking calls and therefore we built semaphores into the
+TCB to sychronize reads, writes, connections, and for mutual exclusion
+of critical sections.&nbsp; This design doesn't handle waking up multiple
+tasks waiting on a read or write which would be useful if the connection
+has closed.&nbsp; This isn't a problem for our application but I'd like
+to find a more general solution.
+
+<P>In Unix, the normal method to handle TCP timers is to have processes
+polling all of the TCB at 200ms and 500ms intervals.&nbsp; Like all polling,
+this means that CPU cycles are "wasted" checking TCB's that don't need
+to be serviced but the method scales well (i.e. linearly) to large numbers
+of TCBs.&nbsp; In uC/IP we use Linux style timers with preallocated timer
+structures that get inserted into an ordered linked list that is polled
+by the system clock interrupt.&nbsp; This works well for a small number
+of TCBs but for more than a few dozen, the overhead of inserting and removing
+timers from the list would start to exceed in a non-linear fashion the
+cost of polling all the TCBs.
+
+<P>The IP module is pretty basic since we only do trivial routing and we
+don't handle fragmentation.&nbsp; One thing that I would like to change
+is the use of the socket style network addresses.&nbsp; The sockaddr struct
+(NetAddr type) is wonderfully general when you want it to handle any type
+of network address but won't be able to handle IPv6 addresses without change.&nbsp;
+So, I would like to go through and simply handle IP addresses.
+<H2>
+<A NAME="Features"></A>Features</H2>
+
+<H3>
+Features Supported</H3>
+
+<UL>
+<LI>
+PPP with PAP authentication and VJ compression</LI>
+
+<LI>
+dynamic IP</LI>
+
+<LI>
+optimized for single request/response exchanges</LI>
+
+<LI>
+TCP keepalive polling with programmable intervals</LI>
+</UL>
+The optimization
+<H3>
+Features NOT Supported</H3>
+
+<UL>
+<LI>
+CHAP authentication (the code is there but not used)</LI>
+
+<LI>
+delayed TCP acknowledgement</LI>
+
+<LI>
+</LI>
+</UL>
+
+</BODY>
+</HTML>
